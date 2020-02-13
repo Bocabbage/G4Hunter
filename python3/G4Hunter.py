@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# Update date: 2020/2/12(unfinished)
+# Update date: 2020/2/13(unfinished)
 ########################################################################
 """
     <G4Hunter - a program to search quadruplex-forming regions in DNA.>
@@ -30,7 +30,7 @@ class Soft:
     def __init__(self):
         pass
 
-    def ReadFile(self,Filein):
+    def ReadFile(self, Filein):
         '''
             Use Bio.SeqIO API to read the fasta file.
         '''
@@ -45,59 +45,83 @@ class Soft:
         return seqs_with_headers
 
     def GFinder(self, infile, k):
+        '''
+            For every entries in the fasta file, read and call
+            __BaseScore and __CalScore to get the mean-scores list
+            of every windows in the seq, then packaging them
+            as output.
+        '''
         seqs_with_headers = self.ReadFile(infile)
-        headers_seqs_nums_scores = []
+        headers_seqs_scores = []
         for seq_with_header in seqs_with_headers:
-            _, bases_score = self.__BaseScore(seq_with_header[1])
+            bases_score = self.__BaseScore(seq_with_header[1])
             mean_scores_list = self.__CalScore(bases_score, k)
-            headers_seqs_nums_scores.append([seq_with_header[0], seq_with_header[1], 
-                                             bases_score, mean_scores_list])
-        return headers_seqs_nums_scores
+            headers_seqs_scores.append([seq_with_header[0], seq_with_header[1], 
+                                             mean_scores_list])
+        return headers_seqs_scores
 
 
-    def GetG4(self, ofile, seq, seq_mean_scores, threshold, k, header):
-        LG4 = []
+    def GetG4(self, ofile, entry, threshold, k):
+        '''
+            Compare mean-scores of windows in the input-seq
+            with the threshold and return the indexes of 
+            G4-windows-long piece as well as writing them 
+            to the ofile using __Write api.
+
+            input:
+                    ofile     -- the output file discriptor
+                    entry     -- [header, seq, seq_mean_scores](output of GFinder)
+                    threshold -- cut-off G4Score
+                    k         -- window width
+        '''
+        LG4_idxes = []
+        header, seq, seq_mean_scores = entry
         SEQ=">"+header+"\n Start \t End \t Sequence\t Length \t Score\n"
         ofile.write(SEQ)
         for i in range(len(seq_mean_scores)):
             if(seq_mean_scores[i] >= threshold or seq_mean_scores[i] <= -threshold):
                 seq_in_win = seq[i:i+k]
-                LG4.append(i)
+                LG4_idxes.append(i)
                 self.__Write(ofile, i, k, 0, 0, seq_in_win, k, seq_mean_scores[i])
                 ofile.write("\n")
-        return LG4
+        return LG4_idxes
 
 
-    def WriteSeq(self, line, liste, ofile, LISTE, header, F):
+    def WriteSeq(self, ofile, entry, g4_idx_list, F):
+        '''
+            Merge the overlapped G4 pieces.
+        '''
+        header, line, liste = entry
         i,k,I=0,0,0
-        a=b=LISTE[i]
+        a=b=g4_idx_list[i]
         MSCORE=[]
         SEQ=">"+header+"\nStart\tEnd\tSequence\tLength\tScore\tNBR\n"
         ofile.write(SEQ)
-        if (len(LISTE) > 1):
-            c=LISTE[i+1]
-            while (i< len(LISTE) - 2):
+
+        if (len(g4_idx_list) > 1):
+            c=g4_idx_list[i+1]
+            while (i< len(g4_idx_list) - 2):
                 if(c==b+1):
                     k=k+1
                     i=i+1
                 else:
                     I=I+1
                     seq=line[a:a+F+k]
-                    sequence, liste2=self.__BaseScore(seq)
+                    liste2=self.__BaseScore(seq)
                     self.__Write(ofile, a, k , F, 0, seq ,len(seq) , round(np.mean(liste2),2))
                     MSCORE.append(abs(round(np.mean(liste2),2)))
                     ofile.write("\n")  
                     k=0
                     i=i+1
-                    a=LISTE[i]
-                b=LISTE[i] 
-                c=LISTE[i+1] 
+                    a=g4_idx_list[i]
+                b=g4_idx_list[i] 
+                c=g4_idx_list[i+1] 
             I=I+1
             seq=line[a:a+F+k+1]
-            sequence,liste2=self.__BaseScore(seq)
-            self.__Write(ofile, a, k ,F,1, seq ,len(seq) , round(np.mean(liste2),2))
+            liste2=self.__BaseScore(seq)
+            self.__Write(ofile, a, k , F, 1, seq ,len(seq) , round(np.mean(liste2),2))
             MSCORE.append(abs(round(np.mean(liste2),2)))
-            ofile.write("\t")
+            ofile.write("\t")          
             ofile.write(str(I))
             ofile.write("\n")
         else:
@@ -107,7 +131,8 @@ class Soft:
             MSCORE.append(abs(liste[a]))
             ofile.write("\t")
             ofile.write(str(I))
-            ofile.write("\n")         
+            ofile.write("\n")   
+
         return MSCORE 
         
 
@@ -159,7 +184,7 @@ class Soft:
                         new_score -= 1
                     else:
                         break
-                bases_score += [ new_score for x in range(new_item - item)]
+                bases_score += [ new_score for x in range(new_item - item) ]
                 item = new_item
 
                 # if more than 4 continuous C, all of them
@@ -173,19 +198,26 @@ class Soft:
                 bases_score.append(0)
                 item += 1
 
-        return seq, bases_score
+        return bases_score
 
 
     def __CalScore(self, bases_score, k):
+        '''
+            Calculate the mean bases score of each
+            width-k-windows.
+            Noted that the sliding step is 1, which
+            means overlapping will happen.
+
+            input:
+                    bases_score -- list of base score of a seq
+                    k           -- window width
+
+            output:
+                    mean_scores_list -- list including mean score of windows
+        '''
         mean_scores_list = []
         for i in range(len(bases_score) - k + 1):
-            k_bases_sum = 0
-            j = 0
-            while(j < k):
-                k_bases_sum += bases_score[i]
-                j += 1
-                i += 1
-            k_bases_mean = k_bases_sum / k
+            k_bases_mean = round(np.mean(bases_score[i:i+k]),2)
             mean_scores_list.append(k_bases_mean)
         return mean_scores_list
 
@@ -221,22 +253,14 @@ if __name__ == '__main__':
     soft = Soft()
     with open("{}W{}_S{}.txt".format(out_file_dir, args.wind, args.score), 'w') as ofile1:
         with open("{}Merge.txt".format(out_file_dir), 'w') as ofile2:
-            headers_seqs_nums_scores = soft.GFinder(args.ifile, args.wind)
-            for entry in headers_seqs_nums_scores:
-                g4_seq = soft.GetG4(
-                                    ofile1, 
-                                    entry[1], 
-                                    entry[3], 
-                                    args.score, args.wind, 
-                                    entry[0]
-                                   )
-                if(len(g4_seq) > 0):
+            headers_seqs_scores = soft.GFinder(args.ifile, args.wind)
+            for entry in headers_seqs_scores:
+                g4_idx_list = soft.GetG4(ofile1, entry, args.score, args.wind)
+                if(len(g4_idx_list) > 0):
                     mscore = soft.WriteSeq(
-                                            entry[1],
-                                            entry[3], 
                                             ofile2,
-                                            g4_seq,
-                                            entry[0], 
+                                            entry,
+                                            g4_idx_list, 
                                             args.wind
                                            )
 
