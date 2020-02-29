@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# Update date: 2020/2/13(unfinished)
+# Update date: 2020/2/13
+# Note: No visualization function which is existed in py2 version.
 ########################################################################
 """
     <G4Hunter - a program to search quadruplex-forming regions in DNA.>
